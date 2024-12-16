@@ -1,0 +1,101 @@
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import matplotlib.pyplot as plt
+
+# Settings
+cumul_return = False
+fix_buy = True
+metric_day_held = False
+metric_gain = True
+gain_sell = 10
+
+
+
+ticker = yf.Ticker("NDX")
+Nasdaq_100 = ticker.history(period="5y")
+print(Nasdaq_100)
+
+df = Nasdaq_100[['Open']]
+df['daily_return'] = df['Open'].pct_change()
+df['cumulative_return_2d'] = (1 + df['daily_return']).rolling(window=2).apply(np.prod, raw=True) - 1
+
+if cumul_return:
+    df['buy_signal'] = df['cumulative_return_2d'] < -0.02
+
+if fix_buy:
+    df['buy_signal'] = df['daily_return'] < -0.02
+
+
+print(df.head(50))
+
+# Initialize portfolio
+initial_cash = 10000000  # Initial cash for both strategies
+cash = initial_cash
+holdings = 0
+portfolio_value_dip = []  # Tracks portfolio value over time
+portfolio_value_hold = []  # Tracks buy-and-hold strategy
+cash_portfolio_value_dip = []
+investments = [] 
+holding_days = 0 
+
+nasdaq_cumulative_return = (1 + df['daily_return']).cumprod()
+portfolio_value_hold = initial_cash * nasdaq_cumulative_return
+
+# Buy-the-Dip Strategy
+for i, row in df.iterrows():
+    # Buy signal
+    if row['buy_signal'] and cash > 0:
+        buy_amount = cash * 0.5  # Use 25% of cash for each dip
+        shares_bought = buy_amount / row['Open']
+        holdings += shares_bought
+        cash -= buy_amount
+
+        # Record the purchase in the investments tracker
+        investments.append({
+            'date': i,  # Track purchase date
+            'shares': shares_bought,
+            'price': row['Open'],  # Purchase price
+            'days_held': 0,  # Initialize holding period
+            'gain':0
+        })
+
+    # Update holding period for each investment and sell if due
+    for lot in investments:
+        lot['days_held'] += 1  # Increment days held
+        lot['gain'] = ((row['Open'] - lot['price'])/ lot['price']) * 100
+
+    # Sell signal: after 30 days, sell proportionally
+    for lot in investments[:]:  # Iterate over a copy of the list for safe removal
+        if metric_day_held:
+            if lot['days_held'] >= 30:
+                sell_amount = lot['shares'] * row['Open']  # Value of shares sold
+                cash += sell_amount
+                holdings -= lot['shares']
+                investments.remove(lot)  # Remove the lot after selling
+        if metric_gain:
+            if lot['gain'] >= gain_sell:
+                sell_amount = lot['shares'] * row['Open']  # Value of shares sold
+                cash += sell_amount
+                holdings -= lot['shares']
+                investments.remove(lot)  # Remove the lot after selling
+
+    cash_portfolio_value_dip.append(cash)
+    portfolio_value = cash + holdings * row['Open']
+    portfolio_value_dip.append(portfolio_value)
+    max_cash = portfolio_value*0.2
+# # Final comparison
+df['portfolio_value_dip'] = portfolio_value_dip
+df['cash'] = cash_portfolio_value_dip
+df['portfolio_value_hold'] = portfolio_value_hold
+
+print(df[['portfolio_value_dip', 'portfolio_value_hold']])
+
+# plt.plot(df['portfolio_value_dip'], label='Buy the Dip')
+plt.figure(figsize=(14, 6))
+plt.plot(df['portfolio_value_hold'], label='Nasdaq-100')
+# plt.plot(df['cash'], label="Cash")
+plt.xlabel("Time")
+plt.ylabel("Market Capitalization")
+plt.legend()
+plt.show()
